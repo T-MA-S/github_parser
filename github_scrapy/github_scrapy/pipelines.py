@@ -5,18 +5,30 @@
 
 
 # useful for handling different item types with a single interface
-from itemadapter import ItemAdapter
 
 
+import string
+from collections import Counter
+
+import nltk
 import psycopg2
-from psycopg2 import sql, extras
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from nltk.tokenize import word_tokenize
+from psycopg2 import extras
 from scrapy.exceptions import DropItem
+
+nltk.download('punkt')
+nltk.download('stopwords')
+
 
 class GithubScrapyPipeline:
     def __init__(self, db_settings):
         self.db_settings = db_settings
         self.connection = None
         self.cursor = None
+
+        self.all_words = Counter()
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -37,6 +49,8 @@ class GithubScrapyPipeline:
 
     def close_spider(self, spider):
         self.connection.close()
+
+        self.save_word_frequency_to_file('word_frequency.txt')
 
     def create_table(self):
         create_table_query = '''
@@ -80,6 +94,16 @@ class GithubScrapyPipeline:
         '''
 
     def process_item(self, item, spider):
+        all_text = ' '.join([
+            item.get('bio', ''),
+            item.get('email', ''),
+            item.get('full_name', ''),
+            item.get('location', ''),
+            str(list(item.get('languages', ''))),
+        ])
+
+        self.update_word_count(all_text)
+
         try:
             insert_query = '''
             INSERT INTO github_profiles (
@@ -101,10 +125,27 @@ class GithubScrapyPipeline:
                 extras.Json(item['social_links'])  # Use Json adapter for the dictionary
             ))
             self.connection.commit()
+
         except Exception as e:
             self.connection.rollback()
-            
+
             raise DropItem(f"Failed to save item to PostgreSQL: {str(e)}")
+
         return item
 
+    def update_word_count(self, text):
+        tokens = word_tokenize(text.lower())
 
+        stop_words = set(stopwords.words('english'))
+        stemmer = PorterStemmer()
+        filtered_tokens = [
+            stemmer.stem(word) for word in tokens
+            if word not in stop_words and word not in string.punctuation
+        ]
+
+        self.all_words.update(filtered_tokens)
+
+    def save_word_frequency_to_file(self, file_path):
+        with open(file_path, 'w') as file:
+            for word, count in self.all_words.items():
+                file.write(f'{word}: {count}\n')
