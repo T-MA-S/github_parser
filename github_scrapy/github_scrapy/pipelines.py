@@ -94,12 +94,13 @@ class GithubScrapyPipeline:
         '''
 
     def process_item(self, item, spider):
+        languages = str(" ".join(list(item.get('languages', ''))))
         all_text = ' '.join([
             item.get('bio', ''),
             item.get('email', ''),
             item.get('full_name', ''),
             item.get('location', ''),
-            str(list(item.get('languages', ''))),
+            languages if languages else ' ',
         ])
 
         self.update_word_count(all_text)
